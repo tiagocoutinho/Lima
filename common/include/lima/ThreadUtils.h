@@ -106,6 +106,79 @@ class LIMACORE_API Cond
 };
 
 
+class LIMACORE_API ReadWriteLock
+{
+ public:
+	class Guard
+	{
+	public:
+		Guard(const Guard& o) : m_lock(o.m_lock)
+		{
+			if (!m_lock)
+				return;
+			AutoMutex l = m_lock->_lock();
+			++m_lock->m_users;
+		}
+
+		Guard(Guard&& o) : m_lock(std::move(o.m_lock))
+		{ o.m_lock = NULL; }
+
+		~Guard()
+		{
+			if (!m_lock)
+				return;
+			AutoMutex l = m_lock->_lock();
+			if (--m_lock->m_users == 0) {
+				m_lock->m_state = Free;
+				m_lock->m_cond.broadcast();
+			}
+		}
+
+	private:
+		friend class ReadWriteLock;
+
+		Guard(ReadWriteLock *lock) : m_lock(lock)
+		{}
+
+		ReadWriteLock *m_lock;
+	};
+
+	ReadWriteLock() : m_state(Free), m_users(0)
+	{}	
+
+	Guard readLock()
+	{ return _guard(ReadLock); }
+
+	Guard writeLock()
+	{ return _guard(WriteLock); }
+
+ private:
+	friend class Guard;
+
+	enum State { Free, ReadLock, WriteLock };
+
+	AutoMutex _lock()
+	{ return AutoMutex(m_cond.mutex()); }
+
+	Guard _guard(State final_state)
+	{
+		bool write_lock = (final_state == WriteLock);
+		
+		AutoMutex l = _lock();
+		while ((m_state == WriteLock)
+		       || ((m_state == ReadLock) && write_lock))
+			m_cond.wait();
+		m_state = final_state;
+		++m_users;
+		return Guard(this);
+	}
+
+	Cond m_cond;
+	State m_state;
+	int m_users;
+};
+
+
 pid_t GetThreadID();
 
 
