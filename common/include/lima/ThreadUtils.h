@@ -109,73 +109,77 @@ class LIMACORE_API Cond
 class LIMACORE_API ReadWriteLock
 {
  public:
-	class Guard
+	class ReadGuard
 	{
 	public:
-		Guard(const Guard& o) : m_lock(o.m_lock)
-		{
-			if (!m_lock)
-				return;
-			AutoMutex l = m_lock->_lock();
-			++m_lock->m_users;
-		}
+		ReadGuard(ReadWriteLock& lock) : m_lock(lock)
+		{ m_lock._waitAndGet(ReadLock); }
 
-		Guard(Guard&& o) : m_lock(std::move(o.m_lock))
-		{ o.m_lock = NULL; }
+		ReadGuard(const ReadGuard& o) = delete;
+		ReadGuard& operator =(const ReadGuard& o) = delete;
 
-		~Guard()
-		{
-			if (!m_lock)
-				return;
-			AutoMutex l = m_lock->_lock();
-			if (--m_lock->m_users == 0) {
-				m_lock->m_state = Free;
-				m_lock->m_cond.broadcast();
-			}
-		}
+		~ReadGuard()
+		{ m_lock._release(); }
 
 	private:
 		friend class ReadWriteLock;
-
-		Guard(ReadWriteLock *lock) : m_lock(lock)
-		{}
-
-		ReadWriteLock *m_lock;
+		ReadWriteLock& m_lock;
 	};
 
-	ReadWriteLock() : m_state(Free), m_users(0)
-	{}	
+	class WriteGuard
+	{
+	public:
+		WriteGuard(ReadWriteLock& lock) : m_lock(lock)
+		{ m_lock._waitAndGet(WriteLock); }
 
-	Guard readLock()
-	{ return _guard(ReadLock); }
+		WriteGuard(const WriteGuard& o) = delete;
+		WriteGuard& operator =(const WriteGuard& o) = delete;
 
-	Guard writeLock()
-	{ return _guard(WriteLock); }
+		~WriteGuard()
+		{ m_lock._release(); }
+
+	private:
+		friend class ReadWriteLock;
+		ReadWriteLock& m_lock;
+	};
+
+	ReadWriteLock() : m_usage(Free), m_readers(0)
+	{}
 
  private:
-	friend class Guard;
+	friend class ReadGuard;
+	friend class WriteGuard;
 
-	enum State { Free, ReadLock, WriteLock };
+	enum Usage { Free, ReadLock, WriteLock };
 
-	AutoMutex _lock()
-	{ return AutoMutex(m_cond.mutex()); }
-
-	Guard _guard(State final_state)
+	void _waitAndGet(Usage requested_usage)
 	{
-		bool write_lock = (final_state == WriteLock);
+		const bool req_write_lock = (requested_usage == WriteLock);
 		
-		AutoMutex l = _lock();
-		while ((m_state == WriteLock)
-		       || ((m_state == ReadLock) && write_lock))
+		AutoMutex l(m_cond.mutex());
+		// While the lock is taken for writing or the lock is taken
+		// for reading and we want to take it for writing
+		while ((m_usage == WriteLock)
+		       || ((m_usage == ReadLock) && req_write_lock))
+			// Wait for availability
 			m_cond.wait();
-		m_state = final_state;
-		++m_users;
-		return Guard(this);
+		m_usage = requested_usage;
+		if (m_usage == ReadLock)
+			++m_readers;
+	}
+
+	void _release()
+	{
+		AutoMutex l(m_cond.mutex());
+		if ((m_usage == WriteLock) || (--m_readers == 0)) {
+			m_usage = Free;
+			m_cond.broadcast();
+		}
 	}
 
 	Cond m_cond;
-	State m_state;
-	int m_users;
+	Usage m_usage;
+	int m_readers;
 };
 
 

@@ -394,7 +394,7 @@ CtControl::~CtControl()
   pool_thread_mgr.wait();
 
   {
-    ReadWriteLock::Guard guard = m_img_status_thread_list_lock.writeLock();
+    ReadWriteLock::WriteGuard guard(m_img_status_thread_list_lock);
     for(ImageStatusThreadList::iterator i = m_img_status_thread_list.begin();
 	i != m_img_status_thread_list.end();++i)
       {
@@ -454,7 +454,7 @@ void CtControl::prepareAcq()
   DEB_MEMBER_FUNCT();
 
   {
-    ReadWriteLock::Guard gard = m_img_status_thread_list_lock.readLock();
+    ReadWriteLock::ReadGuard gard(m_img_status_thread_list_lock);
     ImageStatusThreadList::iterator i, end = m_img_status_thread_list.end();
     for (i = m_img_status_thread_list.begin(); i != end; ++i)
       if (!(*i)->waitIdle(m_prepare_timeout))
@@ -739,7 +739,7 @@ void CtControl::stopAcqAsync(AcqStatus acq_status, ErrorCode error_code,
  */
 void CtControl::_updateImageStatusThreads(bool force)
 {
-  ReadWriteLock::Guard gard = m_img_status_thread_list_lock.readLock();
+  ReadWriteLock::ReadGuard gard(m_img_status_thread_list_lock);
   for(ImageStatusThreadList::iterator i = m_img_status_thread_list.begin();
       i != m_img_status_thread_list.end();++i)
     (*i)->imageStatusChanged(m_status.ImageCounters, force);
@@ -1227,7 +1227,7 @@ void CtControl::registerImageStatusCallback(ImageStatusCallback& cb)
   if(aStatus.AcquisitionStatus == AcqRunning)
     THROW_CTL_ERROR(Error) << "Can't register callback if acquisition is running";
 
-  ReadWriteLock::Guard guard = m_img_status_thread_list_lock.writeLock();
+  ReadWriteLock::WriteGuard guard(m_img_status_thread_list_lock);
   bool found = false;
   ImageStatusThreadList::iterator i, end = m_img_status_thread_list.end();
   for(i = m_img_status_thread_list.begin(); !found && (i != end); ++i)
@@ -1251,7 +1251,7 @@ void CtControl::unregisterImageStatusCallback(ImageStatusCallback& cb)
   if(aStatus.AcquisitionStatus != AcqReady)
     THROW_CTL_ERROR(Error) << "Can't unregister callback if acquisition is not idle";
 
-  ReadWriteLock::Guard guard = m_img_status_thread_list_lock.writeLock();
+  ReadWriteLock::WriteGuard guard(m_img_status_thread_list_lock);
   bool found = false;
   ImageStatusThreadList::iterator i, end = m_img_status_thread_list.end();
   for(i = m_img_status_thread_list.begin(); !found && (i != end); ++i)
